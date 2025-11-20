@@ -4,7 +4,7 @@ import sys
 import os
 from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QVBoxLayout, QLabel
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 # -------------------------------
 # 白部分を置き換える関数
@@ -23,7 +23,6 @@ def replace_white(overlay_img, camera_img):
 
     return result
 
-
 # -------------------------------
 # GUI 本体
 # -------------------------------
@@ -35,21 +34,28 @@ class MainWindow(QWidget):
 
         # 状態変数
         self.capture_img = None
-        self.overlay_img = cv2.imread("google.png")  # ← 白部分を置換したい画像
         self.camera = None
+        self.timer = QTimer()  # プレビュー用タイマー
 
-        # 既存の output_images フォルダを指定
-        self.output_dir = os.path.join(os.getcwd(), "output_images")
+        # main.py のあるフォルダを基準
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+        # google.png 読み込み
+        overlay_path = os.path.join(BASE_DIR, "google.png")
+        self.overlay_img = cv2.imread(overlay_path)
+        if self.overlay_img is None:
+            raise FileNotFoundError(f"{overlay_path} が見つかりません！")
+
+        # output_images フォルダ指定
+        self.output_dir = os.path.join(BASE_DIR, "output_images")
         if not os.path.exists(self.output_dir):
             print("警告: output_images フォルダが存在しません！")
-        else:
-            print(f"保存先フォルダ: {self.output_dir}")
 
-        # GUI部品
+        # GUI 部品
         self.btn_open = QPushButton("① カメラ起動")
         self.btn_cap = QPushButton("② 撮影")
         self.btn_merge = QPushButton("③ 合成")
-        self.label = QLabel("ここに表示されます")
+        self.label = QLabel("ここに画像が表示されます")
 
         self.btn_cap.setEnabled(False)
         self.btn_merge.setEnabled(False)
@@ -61,10 +67,13 @@ class MainWindow(QWidget):
         layout.addWidget(self.label)
         self.setLayout(layout)
 
-        # イベント接続
+        # ボタンイベント
         self.btn_open.clicked.connect(self.open_cam)
         self.btn_cap.clicked.connect(self.capture)
         self.btn_merge.clicked.connect(self.merge_img)
+
+        # タイマーイベント
+        self.timer.timeout.connect(self.update_frame)
 
     # ----------------------
     # ① カメラ起動
@@ -74,20 +83,32 @@ class MainWindow(QWidget):
         if self.camera.isOpened():
             print("カメラ起動 OK")
             self.btn_cap.setEnabled(True)
+            self.timer.start(30)  # 30ms間隔でプレビュー更新
         else:
             print("カメラが見つかりません")
+
+    # ----------------------
+    # タイマーで呼ばれるプレビュー更新
+    # ----------------------
+    def update_frame(self):
+        if self.camera and self.camera.isOpened():
+            ret, frame = self.camera.read()
+            if ret:
+                self.show_img(frame)
 
     # ----------------------
     # ② 撮影 + 保存
     # ----------------------
     def capture(self):
-        ret, frame = self.camera.read()
-        if ret:
-            self.capture_img = frame
-            self.show_img(frame)
-            self.save_capture(frame)
-            print("撮影完了")
-            self.btn_merge.setEnabled(True)
+        if self.camera and self.camera.isOpened():
+            ret, frame = self.camera.read()
+            if ret:
+                self.capture_img = frame
+                self.show_img(frame)
+                self.save_capture(frame)
+                print("撮影完了")
+                self.btn_merge.setEnabled(True)
+                self.timer.stop()  # 撮影後はプレビュー停止
 
     def save_capture(self, img):
         path = os.path.join(self.output_dir, "captured.png")
@@ -112,7 +133,7 @@ class MainWindow(QWidget):
         print("合成画像保存:", path)
 
     # ----------------------
-    # GUI表示処理
+    # GUI 表示
     # ----------------------
     def show_img(self, img):
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -123,7 +144,7 @@ class MainWindow(QWidget):
 
 
 # -------------------------------
-#  main
+# main
 # -------------------------------
 if __name__ == "__main__":
     app = QApplication(sys.argv)
